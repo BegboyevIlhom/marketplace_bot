@@ -1,10 +1,11 @@
 import asyncio
 import logging
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import BOT_TOKEN
+from config import BOT_TOKEN, PORT
 from db.database import init_db
 
 from handlers import (
@@ -15,15 +16,32 @@ from handlers import (
 )
 
 
+async def health_check(request):
+    """Render/Railway kabi platformalar shu manzilga so'rov yuborib,
+    xizmat 'tirik' ekanini tekshiradi. Shuningdek, UptimeRobot kabi
+    bepul monitoring xizmatlari orqali bepul tarifni uyg'oq saqlash uchun
+    ham shu manzil ishlatiladi."""
+    return web.Response(text="Bot ishlayapti ✅")
+
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logging.info(f"Health-check server {PORT}-portda ishga tushdi")
+
+
 async def main():
     logging.basicConfig(level=logging.INFO)
     await init_db()
+    await start_web_server()
 
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Admin routerlar birinchi ulanadi - shunda admin tugmalari
-    # (masalan bir xil matnli tugmalar bo'lsa) ustuvor ishlaydi
     dp.include_router(admin_menu.router)
     dp.include_router(admin_products.router)
     dp.include_router(admin_orders.router)
@@ -33,7 +51,6 @@ async def main():
     dp.include_router(admin_support.router)
     dp.include_router(admin_search.router)
 
-    # Mijoz routerlari
     dp.include_router(client_start.router)
     dp.include_router(client_catalog.router)
     dp.include_router(client_cart.router)
