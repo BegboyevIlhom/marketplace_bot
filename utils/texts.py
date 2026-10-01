@@ -109,6 +109,7 @@ TEXTS = {
     "status_confirmed": {"ru": "✅ Подтвержден", "uz": "✅ Tasdiqlandi"},
     "status_preparing": {"ru": "📦 Собирается", "uz": "📦 Tayyorlanmoqda"},
     "status_shipped": {"ru": "🚚 Передан в доставку", "uz": "🚚 Yetkazishga berildi"},
+    "status_received": {"ru": "📥 Клиент получил заказ", "uz": "📥 Mijoz qabul qildi"},
     "status_completed": {"ru": "🏁 Завершен", "uz": "🏁 Yakunlandi"},
     "status_cancelled": {"ru": "❌ Отменен", "uz": "❌ Bekor qilindi"},
 
@@ -124,6 +125,50 @@ TEXTS = {
         "ru": "Оплата по заказу №{order_id} подтверждена ✅",
         "uz": "№{order_id} buyurtma bo'yicha to'lov tasdiqlandi ✅",
     },
+    "confirm_receipt_btn": {"ru": "✅ Я получил заказ", "uz": "✅ Men qabul qildim"},
+    "receipt_confirmed_client": {
+        "ru": "Спасибо! Подтверждение получено ✅",
+        "uz": "Rahmat! Tasdiqlandi ✅",
+    },
+
+    "btn_search": {"ru": "🔍 Поиск", "uz": "🔍 Qidiruv"},
+    "search_ask": {"ru": "Введите название товара:", "uz": "Mahsulot nomini kiriting:"},
+    "search_no_results": {"ru": "Ничего не найдено 😔", "uz": "Hech narsa topilmadi 😔"},
+    "search_results_title": {"ru": "Результаты поиска:", "uz": "Qidiruv natijalari:"},
+
+    "btn_favorites": {"ru": "❤️ Избранное", "uz": "❤️ Sevimlilar"},
+    "add_favorite_btn": {"ru": "❤️ В избранное", "uz": "❤️ Sevimlilarga qo'shish"},
+    "remove_favorite_btn": {"ru": "💔 Убрать из избранного", "uz": "💔 Sevimlilardan olib tashlash"},
+    "added_to_favorites": {"ru": "Добавлено в избранное ❤️", "uz": "Sevimlilarga qo'shildi ❤️"},
+    "removed_from_favorites": {"ru": "Убрано из избранного", "uz": "Sevimlilardan olib tashlandi"},
+    "favorites_empty": {"ru": "Список избранного пуст", "uz": "Sevimlilar ro'yxati bo'sh"},
+    "favorites_title": {"ru": "❤️ Ваше избранное:", "uz": "❤️ Sevimlilaringiz:"},
+
+    "cart_reminder_text": {
+        "ru": "Вы оставили товары в корзине 🛒\nНе забудьте оформить заказ!",
+        "uz": "Siz savatda mahsulot qoldirgansiz 🛒\nBuyurtma berishni unutmang!",
+    },
+    "view_cart_btn": {"ru": "🛒 Открыть корзину", "uz": "🛒 Savatni ochish"},
+
+    "reorder_btn": {"ru": "🔁 Повторить заказ", "uz": "🔁 Qayta buyurtma"},
+    "reorder_done": {
+        "ru": "Добавлено в корзину: {added}\nНедоступно: {skipped}",
+        "uz": "Savatga qo'shildi: {added}\nMavjud emas: {skipped}",
+    },
+
+    "checkout_ask_promo": {
+        "ru": "Есть промокод? Если нет — нажмите «Пропустить».",
+        "uz": "Promo-kodingiz bormi? Bo'lmasa «O'tkazib yuborish»ni bosing.",
+    },
+    "promo_invalid": {
+        "ru": "Промокод недействителен. Попробуйте другой или нажмите «Пропустить».",
+        "uz": "Promo-kod yaroqsiz. Boshqasini urinib ko'ring yoki «O'tkazib yuborish»ni bosing.",
+    },
+    "promo_applied": {
+        "ru": "Промокод применён! Скидка: {discount}",
+        "uz": "Promo-kod qo'llandi! Chegirma: {discount}",
+    },
+    "discount_label": {"ru": "Скидка", "uz": "Chegirma"},
 }
 
 
@@ -139,6 +184,7 @@ STATUS_KEYS = {
     "confirmed": "status_confirmed",
     "preparing": "status_preparing",
     "shipped": "status_shipped",
+    "received": "status_received",
     "completed": "status_completed",
     "cancelled": "status_cancelled",
 }

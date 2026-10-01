@@ -11,22 +11,37 @@ ADMIN_BTN_PAID = "💰 Оплаченные / To'langanlar"
 ADMIN_BTN_BROADCAST = "📢 Рассылка / Post yuborish"
 ADMIN_BTN_SETTINGS = "⚙️ Настройки / Sozlamalar"
 ADMIN_BTN_STATS = "📊 Продажи / Sotuvlar"
+ADMIN_BTN_EXPORT = "📥 Mijozlar ro'yxati"
+ADMIN_BTN_PROMO = "🎟 Promo-kodlar"
+ADMIN_BTN_STAFF = "👥 Xodimlar"
 ADMIN_BTN_EXIT = "🚪 Выйти из админки / Admin panelidan chiqish"
 
 
 def admin_main_menu_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=ADMIN_BTN_ADD_PRODUCT)],
-            [KeyboardButton(text=ADMIN_BTN_EDIT_PRODUCT)],
-            [KeyboardButton(text=ADMIN_BTN_ACTIVE_ORDERS), KeyboardButton(text=ADMIN_BTN_HISTORY_ORDERS)],
-            [KeyboardButton(text=ADMIN_BTN_PAID)],
-            [KeyboardButton(text=ADMIN_BTN_BROADCAST)],
-            [KeyboardButton(text=ADMIN_BTN_SETTINGS), KeyboardButton(text=ADMIN_BTN_STATS)],
-            [KeyboardButton(text=ADMIN_BTN_EXIT)],
-        ],
-        resize_keyboard=True,
-    )
+    """Eski nom - orqaga moslik uchun saqlangan, to'liq (admin) menyuni qaytaradi."""
+    return admin_menu_kb_for_role("admin")
+
+
+def admin_menu_kb_for_role(role: str) -> ReplyKeyboardMarkup:
+    """Rolga qarab turlicha admin-panel menyusi.
+    admin   - hammasi
+    manager - mahsulot + buyurtmalar + mijozlar ro'yxati (sotuvchi)
+    courier - faqat buyurtmalar (kuryer)
+    """
+    rows = []
+    if role in ("admin", "manager"):
+        rows.append([KeyboardButton(text=ADMIN_BTN_ADD_PRODUCT)])
+        rows.append([KeyboardButton(text=ADMIN_BTN_EDIT_PRODUCT)])
+    if role in ("admin", "manager", "courier"):
+        rows.append([KeyboardButton(text=ADMIN_BTN_ACTIVE_ORDERS), KeyboardButton(text=ADMIN_BTN_HISTORY_ORDERS)])
+    if role in ("admin", "manager"):
+        rows.append([KeyboardButton(text=ADMIN_BTN_PAID), KeyboardButton(text=ADMIN_BTN_EXPORT)])
+    if role == "admin":
+        rows.append([KeyboardButton(text=ADMIN_BTN_BROADCAST)])
+        rows.append([KeyboardButton(text=ADMIN_BTN_SETTINGS), KeyboardButton(text=ADMIN_BTN_STATS)])
+        rows.append([KeyboardButton(text=ADMIN_BTN_PROMO), KeyboardButton(text=ADMIN_BTN_STAFF)])
+    rows.append([KeyboardButton(text=ADMIN_BTN_EXIT)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
 def admin_categories_kb(categories: list[dict], prefix: str, with_add: bool = False) -> InlineKeyboardMarkup:
@@ -107,12 +122,14 @@ def order_actions_kb(order: dict) -> InlineKeyboardMarkup:
 
     if status == "pending" and order["city"] == "other" and order["delivery_price"] is None:
         rows.append([InlineKeyboardButton(text="💵 Yetkazish narxini belgilash", callback_data=f"setdeliv:{order_id}")])
+    elif status == "shipped":
+        rows.append([InlineKeyboardButton(text="⏳ Mijoz tasdiqlashini kutish...", callback_data="noop")])
     else:
         next_map = {
             "pending": ("✅ Tasdiqlash", "confirmed"),
             "confirmed": ("📦 Tayyorlashni boshlash", "preparing"),
             "preparing": ("🚚 Yetkazishga berish", "shipped"),
-            "shipped": ("🏁 Yakunlash", "completed"),
+            "received": ("🏁 Yakunlash", "completed"),
         }
         if status in next_map:
             label, new_status = next_map[status]
@@ -163,3 +180,54 @@ def support_reply_kb(support_msg_id: int, user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Ответить / Javob berish", callback_data=f"supreply:{support_msg_id}:{user_id}")]
     ])
+
+
+def staff_list_kb(staff: list[dict]) -> InlineKeyboardMarkup:
+    role_names = {"manager": "Sotuvchi", "courier": "Kuryer"}
+    rows = [
+        [InlineKeyboardButton(
+            text=f"🗑 {s['tg_id']} — {role_names.get(s['role'], s['role'])}",
+            callback_data=f"staffdel:{s['tg_id']}",
+        )]
+        for s in staff
+    ]
+    rows.append([InlineKeyboardButton(text="➕ Yangi xodim qo'shish", callback_data="staff_add")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def staff_role_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛍 Sotuvchi (mahsulot + buyurtma)", callback_data="staffrole:manager")],
+        [InlineKeyboardButton(text="🚚 Kuryer (faqat buyurtma)", callback_data="staffrole:courier")],
+    ])
+
+
+def promo_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Yangi promo-kod yaratish", callback_data="promo_new")],
+        [InlineKeyboardButton(text="📋 Ro'yxat", callback_data="promo_list")],
+    ])
+
+
+def promo_type_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="% Foizli chegirma", callback_data="promotype:percent")],
+        [InlineKeyboardButton(text="💰 Belgilangan summa", callback_data="promotype:fixed")],
+    ])
+
+
+def promo_skip_maxuses_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="♾️ Cheksiz (o'tkazib yuborish)", callback_data="promo_skip_maxuses")]
+    ])
+
+
+def promo_list_kb(promos: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for p in promos:
+        status = "✅" if p["active"] else "🚫"
+        usage = f"{p['used_count']}/{p['max_uses']}" if p["max_uses"] else f"{p['used_count']}/∞"
+        value = f"{p['discount_value']}%" if p["discount_type"] == "percent" else f"{p['discount_value']:,}".replace(",", " ")
+        label = f"{status} {p['code']} — {value} ({usage})"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"promotoggle:{p['code']}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

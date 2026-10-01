@@ -3,10 +3,11 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 import db.database as db
-from handlers.admin_menu import is_admin
+from handlers.admin_menu import can_manage_orders
 from utils.states import SetDeliveryPrice, OrderSearch
 from utils.texts import status_text, t
 from keyboards.admin_kb import order_actions_kb, ADMIN_BTN_ACTIVE_ORDERS, ADMIN_BTN_HISTORY_ORDERS, ADMIN_BTN_PAID
+from keyboards.client_kb import confirm_receipt_kb
 
 router = Router()
 
@@ -46,7 +47,7 @@ async def _send_order_card(message: Message, order: dict):
 
 @router.message(F.text == ADMIN_BTN_ACTIVE_ORDERS)
 async def show_active_orders(message: Message):
-    if not is_admin(message.from_user.id):
+    if not await can_manage_orders(message.from_user.id):
         return
     orders = await db.get_active_orders()
     if not orders:
@@ -58,7 +59,7 @@ async def show_active_orders(message: Message):
 
 @router.message(F.text == ADMIN_BTN_HISTORY_ORDERS)
 async def show_history_orders(message: Message):
-    if not is_admin(message.from_user.id):
+    if not await can_manage_orders(message.from_user.id):
         return
     orders = await db.get_history_orders()
     if not orders:
@@ -73,7 +74,7 @@ async def show_history_orders(message: Message):
 
 @router.message(F.text == ADMIN_BTN_PAID)
 async def show_paid_orders(message: Message):
-    if not is_admin(message.from_user.id):
+    if not await can_manage_orders(message.from_user.id):
         return
     active = await db.get_active_orders()
     history = await db.get_history_orders()
@@ -98,10 +99,12 @@ async def set_status(callback: CallbackQuery, bot: Bot):
 
     if user:
         lang = user["language"] or "ru"
+        kb = confirm_receipt_kb(order_id, lang) if new_status == "shipped" else None
         try:
             await bot.send_message(
                 user["tg_id"],
                 t("status_changed_notify", lang, order_id=order_id, status=status_text(new_status, lang)),
+                reply_markup=kb,
             )
         except Exception:
             pass
@@ -160,12 +163,13 @@ async def set_delivery_price_value(message: Message, state: FSMContext, bot: Bot
 
     if user:
         lang = user["language"] or "ru"
+        payment_info = await db.get_setting("payment_info")
+        notify_text = t(
+            "delivery_price_set_notify", lang, order_id=order_id,
+            price=f"{price:,}".replace(",", " "), total=f"{new_total:,}".replace(",", " "),
+        ) + f"\n\n{payment_info}"
         try:
-            await bot.send_message(
-                user["tg_id"],
-                t("delivery_price_set_notify", lang, order_id=order_id,
-                  price=f"{price:,}".replace(",", " "), total=f"{new_total:,}".replace(",", " ")),
-            )
+            await bot.send_message(user["tg_id"], notify_text)
         except Exception:
             pass
 

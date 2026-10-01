@@ -94,3 +94,16 @@ async def clear_cart(message: Message):
 async def continue_shopping(message: Message):
     lang = await _lang(message.from_user.id)
     await message.answer(t("main_menu_client", lang), reply_markup=main_menu_kb(lang))
+
+
+@router.callback_query(F.data == "view_cart_from_reminder")
+async def view_cart_from_reminder(callback: CallbackQuery):
+    lang = await _lang(callback.from_user.id)
+    user = await db.get_or_create_user(callback.from_user.id)
+    cart = await db.get_cart(user["id"])
+    if not cart:
+        await callback.message.answer(t("cart_empty", lang))
+    else:
+        await callback.message.answer(_cart_text(cart, lang), reply_markup=cart_kb(cart, lang))
+        await callback.message.answer(t("main_menu_client", lang), reply_markup=cart_actions_kb(lang))
+    await callback.answer()

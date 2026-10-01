@@ -3,7 +3,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 import db.database as db
-from handlers.admin_menu import is_admin
+from handlers.admin_menu import can_manage_products
 from utils.states import SupportReply
 from utils.texts import t
 from keyboards.client_kb import main_menu_kb
@@ -13,7 +13,7 @@ router = Router()
 
 @router.callback_query(F.data.startswith("supreply:"))
 async def support_reply_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await can_manage_products(callback.from_user.id):
         return
     _, msg_id, client_tg_id = callback.data.split(":")
     await state.update_data(reply_client_tg_id=int(client_tg_id))
@@ -24,7 +24,7 @@ async def support_reply_start(callback: CallbackQuery, state: FSMContext):
 
 @router.message(SupportReply.waiting_reply)
 async def support_reply_send(message: Message, state: FSMContext, bot: Bot):
-    if not is_admin(message.from_user.id):
+    if not await can_manage_products(message.from_user.id):
         return
     data = await state.get_data()
     client_tg_id = data["reply_client_tg_id"]

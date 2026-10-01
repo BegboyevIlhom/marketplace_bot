@@ -44,6 +44,21 @@ async def show_products(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("catsort:"))
+async def sort_products(callback: CallbackQuery):
+    lang = await _lang(callback.from_user.id)
+    _, cat_id, sort = callback.data.split(":")
+    cat_id = int(cat_id)
+    products = await db.get_products_by_category(cat_id, sort=sort)
+    if not products:
+        await callback.answer(t("no_products", lang), show_alert=True)
+        return
+    await callback.message.edit_text(
+        t("choose_product", lang), reply_markup=products_kb(products, lang, cat_id, sort)
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("prod:"))
 async def show_product_card(callback: CallbackQuery):
     lang = await _lang(callback.from_user.id)
@@ -52,6 +67,9 @@ async def show_product_card(callback: CallbackQuery):
     if not p or p["is_deleted"] or p["is_hidden"]:
         await callback.answer(t("no_products", lang), show_alert=True)
         return
+
+    user = await db.get_or_create_user(callback.from_user.id)
+    is_fav = await db.is_favorite(user["id"], product_id)
 
     name = p["name_ru"] if lang == "ru" else p["name_uz"]
     short = p["short_ru"] if lang == "ru" else p["short_uz"]
@@ -69,14 +87,57 @@ async def show_product_card(callback: CallbackQuery):
         text += f"\n\n💰 <b>{price}</b>"
     text += f"\n{t('available', lang) if p['available'] else t('not_available', lang)}"
 
-    kb = product_card_kb(product_id, p["category_id"], lang)
+    kb = product_card_kb(product_id, p["category_id"], lang, is_fav=is_fav)
+    extra_photos = json.loads(p["photos_extra"] or "[]")
 
-    if p["photo_main"]:
+    if extra_photos:
+        # Bir nechta rasm bo'lsa - albom (media group) sifatida yuboriladi.
+        # Telegram media group'ga tugma (reply_markup) biriktirib bo'lmaydi,
+        # shuning uchun tugmalar alohida, qisqa xabarda yuboriladi.
+        media = [InputMediaPhoto(media=p["photo_main"], caption=text, parse_mode="HTML")]
+        for file_id in extra_photos[:9]:
+            media.append(InputMediaPhoto(media=file_id))
+        await callback.message.answer_media_group(media)
+        await callback.message.answer(name, reply_markup=kb)
+        await callback.message.delete()
+    elif p["photo_main"]:
         await callback.message.answer_photo(p["photo_main"], caption=text, reply_markup=kb, parse_mode="HTML")
         await callback.message.delete()
     else:
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("favadd:"))
+async def add_favorite_cb(callback: CallbackQuery):
+    lang = await _lang(callback.from_user.id)
+    product_id = int(callback.data.split(":")[1])
+    user = await db.get_or_create_user(callback.from_user.id)
+    await db.add_favorite(user["id"], product_id)
+    p = await db.get_product(product_id)
+    if p:
+        kb = product_card_kb(product_id, p["category_id"], lang, is_fav=True)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
+    await callback.answer(t("added_to_favorites", lang))
+
+
+@router.callback_query(F.data.startswith("favdel:"))
+async def remove_favorite_cb(callback: CallbackQuery):
+    lang = await _lang(callback.from_user.id)
+    product_id = int(callback.data.split(":")[1])
+    user = await db.get_or_create_user(callback.from_user.id)
+    await db.remove_favorite(user["id"], product_id)
+    p = await db.get_product(product_id)
+    if p:
+        kb = product_card_kb(product_id, p["category_id"], lang, is_fav=False)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
+    await callback.answer(t("removed_from_favorites", lang))
 
 
 @router.callback_query(F.data.startswith("addcart:"))

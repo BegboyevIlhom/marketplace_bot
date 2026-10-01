@@ -96,15 +96,45 @@ async def checkout_address_text(message: Message, state: FSMContext):
 
 
 @router.message(Checkout.comment)
-async def checkout_comment(message: Message, state: FSMContext, bot: Bot):
+async def checkout_comment(message: Message, state: FSMContext):
     lang = await _lang(message.from_user.id)
     comment = "" if message.text == t("btn_skip", lang) else message.text
     await state.update_data(comment=comment)
+    await message.answer(t("checkout_ask_promo", lang), reply_markup=skip_kb(lang))
+    await state.set_state(Checkout.promo)
+
+
+@router.message(Checkout.promo)
+async def checkout_promo(message: Message, state: FSMContext):
+    lang = await _lang(message.from_user.id)
     data = await state.get_data()
 
     user = await db.get_or_create_user(message.from_user.id)
     cart = await db.get_cart(user["id"])
+    if not cart:
+        await message.answer(t("cart_empty", lang), reply_markup=main_menu_kb(lang))
+        await state.clear()
+        return
     items_total = sum(i["price"] * i["quantity"] for i in cart)
+
+    discount_amount = 0
+    promo_code_used = None
+    if message.text != t("btn_skip", lang):
+        code = message.text.strip()
+        promo = await db.get_promo_code(code)
+        valid = bool(promo) and bool(promo["active"])
+        if valid and promo["max_uses"] is not None and promo["used_count"] >= promo["max_uses"]:
+            valid = False
+        if not valid:
+            await message.answer(t("promo_invalid", lang), reply_markup=skip_kb(lang))
+            return  # shu holatda qoladi - mijoz qayta urinishi yoki o'tkazib yuborishi mumkin
+        if promo["discount_type"] == "percent":
+            discount_amount = round(items_total * promo["discount_value"] / 100)
+        else:
+            discount_amount = min(promo["discount_value"], items_total)
+        promo_code_used = promo["code"]
+        discount_str = f"{discount_amount:,}".replace(",", " ")
+        await message.answer(t("promo_applied", lang, discount=discount_str))
 
     delivery_price = None
     delivery_line = t("delivery_pending", lang)
@@ -117,7 +147,7 @@ async def checkout_comment(message: Message, state: FSMContext, bot: Bot):
         else:
             delivery_line = f"{delivery_price:,}".replace(",", " ")
 
-    total = items_total + (delivery_price or 0)
+    total = items_total - discount_amount + (delivery_price or 0)
 
     lines = [t("checkout_confirm_title", lang), ""]
     for i, item in enumerate(cart, 1):
@@ -125,6 +155,8 @@ async def checkout_comment(message: Message, state: FSMContext, bot: Bot):
         lines.append(f"{i}. {name} x{item['quantity']}")
     lines.append("")
     lines.append(f"{t('cart_total', lang)}: {items_total:,}".replace(",", " "))
+    if discount_amount:
+        lines.append(f"{t('discount_label', lang)}: -{discount_amount:,}".replace(",", " "))
     lines.append(f"{t('delivery_cost', lang)}: {delivery_line}")
     if delivery_price is not None:
         lines.append(f"= {total:,}".replace(",", " "))
@@ -133,10 +165,13 @@ async def checkout_comment(message: Message, state: FSMContext, bot: Bot):
     lines.append("")
     lines.append(f"👤 {data['name']}")
     lines.append(f"📍 {data['address']}")
-    if comment:
-        lines.append(f"💬 {comment}")
+    if data.get("comment"):
+        lines.append(f"💬 {data['comment']}")
 
-    await state.update_data(delivery_price=delivery_price, items_total=items_total, total=total)
+    await state.update_data(
+        delivery_price=delivery_price, items_total=items_total, total=total,
+        discount_amount=discount_amount, promo_code=promo_code_used,
+    )
     await message.answer("\n".join(lines), reply_markup=confirm_order_kb(lang))
     await state.set_state(Checkout.confirm)
 
@@ -164,7 +199,11 @@ async def checkout_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot)
         comment=data.get("comment", ""),
         recipient_name=data["name"],
         recipient_phone=user["phone"],
+        promo_code=data.get("promo_code"),
+        discount_amount=data.get("discount_amount", 0),
     )
+    if data.get("promo_code"):
+        await db.increment_promo_usage(data["promo_code"])
     await db.clear_cart(user["id"])
     await state.clear()
 

@@ -4,7 +4,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 import db.database as db
-from handlers.admin_menu import is_admin
+from handlers.admin_menu import can_manage_orders
 from utils.states import OrderSearch
 from utils.texts import status_text
 
@@ -13,7 +13,7 @@ router = Router()
 
 @router.message(Command("search"))
 async def search_start(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+    if not await can_manage_orders(message.from_user.id):
         return
     await state.set_state(OrderSearch.waiting_query)
     await message.answer("Buyurtma raqami, telefon yoki ismni kiriting:")

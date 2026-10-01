@@ -25,6 +25,7 @@ DEFAULT_SETTINGS = {
     "delivery_price_tashkent": "30000",
     "free_delivery_threshold": "0",
     "payment_info": "To'lov kuryerga naqd yoki karta orqali amalga oshiriladi.",
+    "cart_reminder_delay_hours": "2",
 }
 
 SETTINGS_LABELS = {
@@ -39,6 +40,10 @@ SETTINGS_LABELS = {
     "delivery_price_tashkent": {"ru": "Стоимость доставки (Ташкент)", "uz": "Yetkazib berish narxi (Toshkent)"},
     "free_delivery_threshold": {"ru": "Бесплатная доставка от суммы (0 = выкл)", "uz": "Shu summadan bepul yetkazish (0 = o'chirilgan)"},
     "payment_info": {"ru": "Текст об оплате", "uz": "To'lov haqida matn"},
+    "cart_reminder_delay_hours": {
+        "ru": "Напоминание о корзине через (часов)",
+        "uz": "Savat eslatmasi necha soatdan keyin",
+    },
 }
 
 _pool: asyncpg.Pool | None = None
@@ -135,8 +140,44 @@ async def init_db():
                 created_at BIGINT,
                 answered INTEGER DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS cart_reminders (
+                user_id INTEGER PRIMARY KEY,
+                last_cart_change_at BIGINT,
+                reminder_sent INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS favorites (
+                user_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                PRIMARY KEY (user_id, product_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS promo_codes (
+                code TEXT PRIMARY KEY,
+                discount_type TEXT NOT NULL,
+                discount_value INTEGER NOT NULL,
+                active INTEGER DEFAULT 1,
+                max_uses INTEGER,
+                used_count INTEGER DEFAULT 0,
+                created_at BIGINT
+            );
+
+            CREATE TABLE IF NOT EXISTS staff (
+                tg_id BIGINT PRIMARY KEY,
+                role TEXT NOT NULL,
+                name TEXT,
+                added_at BIGINT
+            );
             """
         )
+        # Eski (allaqachon ishlab turgan) bazalarga yangi ustunlarni xavfsiz qo'shish.
+        # CREATE TABLE IF NOT EXISTS mavjud jadvalga yangi ustun qo'sha olmaydi,
+        # shuning uchun buni alohida qilamiz - mavjud Railway/Supabase bazalari
+        # qo'lda o'chirilmasdan avtomatik yangilanadi.
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS promo_code TEXT")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount INTEGER DEFAULT 0")
+
         for k, v in DEFAULT_SETTINGS.items():
             await conn.execute(
                 "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING",
@@ -198,6 +239,13 @@ async def get_all_user_tg_ids() -> list[int]:
         return [r["tg_id"] for r in rows]
 
 
+async def get_all_users() -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM users ORDER BY id")
+        return [_d(r) for r in rows]
+
+
 # ---------- CATEGORIES ----------
 
 async def add_category(name_ru: str, name_uz: str) -> int:
@@ -244,18 +292,37 @@ async def add_product(data: dict) -> int:
         )
 
 
-async def get_products_by_category(cat_id: int, include_hidden: bool = False) -> list[dict]:
+async def get_products_by_category(cat_id: int, include_hidden: bool = False, sort: str = "default") -> list[dict]:
+    order_clause = "ORDER BY id"
+    if sort == "price_asc":
+        order_clause = "ORDER BY price ASC"
+    elif sort == "price_desc":
+        order_clause = "ORDER BY price DESC"
     pool = await get_pool()
     async with pool.acquire() as conn:
         if include_hidden:
             rows = await conn.fetch(
-                "SELECT * FROM products WHERE category_id=$1 AND is_deleted=0 ORDER BY id", cat_id
+                f"SELECT * FROM products WHERE category_id=$1 AND is_deleted=0 {order_clause}", cat_id
             )
         else:
             rows = await conn.fetch(
-                "SELECT * FROM products WHERE category_id=$1 AND is_deleted=0 AND is_hidden=0 ORDER BY id",
+                f"SELECT * FROM products WHERE category_id=$1 AND is_deleted=0 AND is_hidden=0 {order_clause}",
                 cat_id,
             )
+        return [_d(r) for r in rows]
+
+
+async def search_products(query: str) -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        like = f"%{query}%"
+        rows = await conn.fetch(
+            """SELECT * FROM products
+               WHERE is_deleted=0 AND is_hidden=0 AND available=1
+               AND (name_ru ILIKE $1 OR name_uz ILIKE $1)
+               ORDER BY id LIMIT 30""",
+            like,
+        )
         return [_d(r) for r in rows]
 
 
@@ -295,6 +362,19 @@ async def delete_product(product_id: int):
 
 # ---------- CART ----------
 
+async def _touch_cart_reminder(conn, user_id: int):
+    """Savat o'zgarganda - eslatma 'soatini' yangidan boshlaydi."""
+    await conn.execute(
+        "INSERT INTO cart_reminders (user_id, last_cart_change_at, reminder_sent) VALUES ($1,$2,0) "
+        "ON CONFLICT (user_id) DO UPDATE SET last_cart_change_at=excluded.last_cart_change_at, reminder_sent=0",
+        user_id, int(time.time()),
+    )
+
+
+async def _clear_cart_reminder(conn, user_id: int):
+    await conn.execute("DELETE FROM cart_reminders WHERE user_id=$1", user_id)
+
+
 async def add_to_cart(user_id: int, product_id: int, qty: int = 1):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -311,6 +391,7 @@ async def add_to_cart(user_id: int, product_id: int, qty: int = 1):
                 "INSERT INTO cart_items (user_id, product_id, quantity) VALUES ($1,$2,$3)",
                 user_id, product_id, qty,
             )
+        await _touch_cart_reminder(conn, user_id)
 
 
 async def get_cart(user_id: int) -> list[dict]:
@@ -328,36 +409,69 @@ async def get_cart(user_id: int) -> list[dict]:
 async def update_cart_qty(cart_item_id: int, delta: int) -> int:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT quantity FROM cart_items WHERE id=$1", cart_item_id)
+        row = await conn.fetchrow("SELECT quantity, user_id FROM cart_items WHERE id=$1", cart_item_id)
         if not row:
             return 0
+        user_id = row["user_id"]
         new_qty = max(0, row["quantity"] + delta)
         if new_qty == 0:
             await conn.execute("DELETE FROM cart_items WHERE id=$1", cart_item_id)
         else:
             await conn.execute("UPDATE cart_items SET quantity=$1 WHERE id=$2", new_qty, cart_item_id)
+        remaining = await conn.fetchval("SELECT COUNT(*) FROM cart_items WHERE user_id=$1", user_id)
+        if remaining == 0:
+            await _clear_cart_reminder(conn, user_id)
+        else:
+            await _touch_cart_reminder(conn, user_id)
         return new_qty
 
 
 async def remove_cart_item(cart_item_id: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT user_id FROM cart_items WHERE id=$1", cart_item_id)
         await conn.execute("DELETE FROM cart_items WHERE id=$1", cart_item_id)
+        if row:
+            remaining = await conn.fetchval(
+                "SELECT COUNT(*) FROM cart_items WHERE user_id=$1", row["user_id"]
+            )
+            if remaining == 0:
+                await _clear_cart_reminder(conn, row["user_id"])
 
 
 async def clear_cart(user_id: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM cart_items WHERE user_id=$1", user_id)
+        await _clear_cart_reminder(conn, user_id)
+
+
+async def get_users_needing_reminder(threshold_ts: int) -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT u.* FROM cart_reminders cr
+               JOIN users u ON u.id = cr.user_id
+               WHERE cr.last_cart_change_at <= $1 AND cr.reminder_sent = 0""",
+            threshold_ts,
+        )
+        return [_d(r) for r in rows]
+
+
+async def mark_reminder_sent(user_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE cart_reminders SET reminder_sent=1 WHERE user_id=$1", user_id)
 
 
 # ---------- ORDERS ----------
 
 async def create_order(user_id: int, cart: list[dict], city: str, delivery_price,
                         address: str, lat, lon, comment: str,
-                        recipient_name: str, recipient_phone: str) -> dict:
+                        recipient_name: str, recipient_phone: str,
+                        promo_code: str | None = None, discount_amount: int = 0) -> dict:
     items_total = sum(item["price"] * item["quantity"] for item in cart)
-    total = items_total + (delivery_price or 0)
+    total = items_total - discount_amount + (delivery_price or 0)
     status = "pending"
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -366,12 +480,12 @@ async def create_order(user_id: int, cart: list[dict], city: str, delivery_price
                 """INSERT INTO orders
                 (user_id, status, payment_status, city, delivery_price, address,
                  location_lat, location_lon, comment, recipient_name, recipient_phone,
-                 items_total, total, created_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                 items_total, total, created_at, promo_code, discount_amount)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                 RETURNING id""",
                 user_id, status, "unpaid", city, delivery_price, address, lat, lon,
                 comment, recipient_name, recipient_phone, items_total, total,
-                int(time.time()),
+                int(time.time()), promo_code, discount_amount,
             )
             for item in cart:
                 await conn.execute(
@@ -540,3 +654,111 @@ async def get_sales_stats(since_ts: int) -> dict:
             "avg_check": avg_check,
             "top_products": top_products,
         }
+
+
+# ---------- FAVORITES ----------
+
+async def add_favorite(user_id: int, product_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO favorites (user_id, product_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+            user_id, product_id,
+        )
+
+
+async def remove_favorite(user_id: int, product_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM favorites WHERE user_id=$1 AND product_id=$2", user_id, product_id)
+
+
+async def is_favorite(user_id: int, product_id: int) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        val = await conn.fetchval(
+            "SELECT 1 FROM favorites WHERE user_id=$1 AND product_id=$2", user_id, product_id
+        )
+        return bool(val)
+
+
+async def get_favorites(user_id: int) -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT p.* FROM favorites f JOIN products p ON p.id = f.product_id
+               WHERE f.user_id=$1 AND p.is_deleted=0 ORDER BY p.id""",
+            user_id,
+        )
+        return [_d(r) for r in rows]
+
+
+# ---------- PROMO CODES ----------
+
+async def create_promo_code(code: str, discount_type: str, discount_value: int, max_uses: int | None):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO promo_codes (code, discount_type, discount_value, max_uses, active, created_at)
+               VALUES ($1,$2,$3,$4,1,$5)
+               ON CONFLICT (code) DO UPDATE SET discount_type=excluded.discount_type,
+               discount_value=excluded.discount_value, max_uses=excluded.max_uses, active=1""",
+            code.upper(), discount_type, discount_value, max_uses, int(time.time()),
+        )
+
+
+async def get_promo_code(code: str) -> dict | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM promo_codes WHERE code=$1", code.upper())
+        return _d(row)
+
+
+async def get_all_promo_codes() -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM promo_codes ORDER BY created_at DESC")
+        return [_d(r) for r in rows]
+
+
+async def toggle_promo_code(code: str, active: bool):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE promo_codes SET active=$1 WHERE code=$2", 1 if active else 0, code.upper())
+
+
+async def increment_promo_usage(code: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE promo_codes SET used_count = used_count + 1 WHERE code=$1", code.upper())
+
+
+# ---------- STAFF (sotuvchi / kuryer rollari) ----------
+
+async def add_staff(tg_id: int, role: str, name: str = ""):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO staff (tg_id, role, name, added_at) VALUES ($1,$2,$3,$4) "
+            "ON CONFLICT (tg_id) DO UPDATE SET role=excluded.role, name=excluded.name",
+            tg_id, role, name, int(time.time()),
+        )
+
+
+async def remove_staff(tg_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM staff WHERE tg_id=$1", tg_id)
+
+
+async def get_staff_role(tg_id: int) -> str | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT role FROM staff WHERE tg_id=$1", tg_id)
+
+
+async def get_all_staff() -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM staff ORDER BY added_at")
+        return [_d(r) for r in rows]

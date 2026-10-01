@@ -10,7 +10,24 @@ class Checkout(StatesGroup):
     city = State()
     address = State()
     comment = State()
+    promo = State()
     confirm = State()
+
+
+class Search(StatesGroup):
+    waiting_query = State()
+
+
+class AddStaff(StatesGroup):
+    tg_id = State()
+    role = State()
+
+
+class AddPromo(StatesGroup):
+    code = State()
+    type = State()
+    value = State()
+    max_uses = State()
 
 
 class Support(StatesGroup):

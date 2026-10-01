@@ -21,7 +21,8 @@ def phone_request_kb(lang: str) -> ReplyKeyboardMarkup:
 def main_menu_kb(lang: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=t("btn_catalog", lang)), KeyboardButton(text=t("btn_cart", lang))],
+            [KeyboardButton(text=t("btn_catalog", lang)), KeyboardButton(text=t("btn_search", lang))],
+            [KeyboardButton(text=t("btn_cart", lang)), KeyboardButton(text=t("btn_favorites", lang))],
             [KeyboardButton(text=t("btn_orders", lang)), KeyboardButton(text=t("btn_about", lang))],
             [KeyboardButton(text=t("btn_support", lang))],
         ],
@@ -37,19 +38,42 @@ def categories_kb(categories: list[dict], lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def products_kb(products: list[dict], lang: str, cat_id: int) -> InlineKeyboardMarkup:
+def products_kb(products: list[dict], lang: str, cat_id: int, sort: str = "default") -> InlineKeyboardMarkup:
     rows = []
     for p in products:
         name = p["name_ru"] if lang == "ru" else p["name_uz"]
         price = f"{p['price']:,}".replace(",", " ")
         rows.append([InlineKeyboardButton(text=f"{name} — {price}", callback_data=f"prod:{p['id']}")])
+
+    sort_row = []
+    if sort != "price_asc":
+        sort_row.append(InlineKeyboardButton(text="⬆️ Arzon", callback_data=f"catsort:{cat_id}:price_asc"))
+    if sort != "price_desc":
+        sort_row.append(InlineKeyboardButton(text="⬇️ Qimmat", callback_data=f"catsort:{cat_id}:price_desc"))
+    if sort != "default":
+        sort_row.append(InlineKeyboardButton(text="↩️ Odatiy", callback_data=f"catsort:{cat_id}:default"))
+    if sort_row:
+        rows.append(sort_row)
+
     rows.append([InlineKeyboardButton(text=t("btn_back", lang), callback_data="cat:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def product_card_kb(product_id: int, cat_id: int, lang: str) -> InlineKeyboardMarkup:
+def search_results_kb(products: list[dict], lang: str) -> InlineKeyboardMarkup:
+    rows = []
+    for p in products:
+        name = p["name_ru"] if lang == "ru" else p["name_uz"]
+        price = f"{p['price']:,}".replace(",", " ")
+        rows.append([InlineKeyboardButton(text=f"{name} — {price}", callback_data=f"prod:{p['id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def product_card_kb(product_id: int, cat_id: int, lang: str, is_fav: bool = False) -> InlineKeyboardMarkup:
+    fav_text = t("remove_favorite_btn", lang) if is_fav else t("add_favorite_btn", lang)
+    fav_callback = f"favdel:{product_id}" if is_fav else f"favadd:{product_id}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t("add_to_cart_btn", lang), callback_data=f"addcart:{product_id}")],
+        [InlineKeyboardButton(text=fav_text, callback_data=fav_callback)],
         [InlineKeyboardButton(text=t("btn_back", lang), callback_data=f"cat:{cat_id}")],
     ])
 
@@ -119,6 +143,18 @@ def orders_tabs_kb(lang: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=t("orders_tab_active", lang), callback_data="orders:active"),
             InlineKeyboardButton(text=t("orders_tab_history", lang), callback_data="orders:history"),
         ]
+    ])
+
+
+def confirm_receipt_kb(order_id: int, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("confirm_receipt_btn", lang), callback_data=f"confirm_receipt:{order_id}")]
+    ])
+
+
+def cart_reminder_kb(lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("view_cart_btn", lang), callback_data="view_cart_from_reminder")]
     ])
 
 

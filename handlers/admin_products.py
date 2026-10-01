@@ -5,7 +5,7 @@ import json
 
 import db.database as db
 from utils.states import AddProduct, EditProduct
-from handlers.admin_menu import is_admin
+from handlers.admin_menu import can_manage_products
 from keyboards.admin_kb import (
     admin_categories_kb, admin_products_kb, skip_old_price_kb, photo_extra_done_kb,
     availability_kb, add_product_confirm_kb, edit_product_fields_kb, confirm_delete_kb,
@@ -19,7 +19,7 @@ router = Router()
 
 @router.message(F.text == ADMIN_BTN_ADD_PRODUCT)
 async def add_product_start(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+    if not await can_manage_products(message.from_user.id):
         return
     categories = await db.get_categories()
     await state.set_state(AddProduct.category)
@@ -209,7 +209,7 @@ async def cancel_add_product(callback: CallbackQuery, state: FSMContext):
 
 @router.message(F.text == ADMIN_BTN_EDIT_PRODUCT)
 async def edit_product_start(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
+    if not await can_manage_products(message.from_user.id):
         return
     categories = await db.get_categories()
     if not categories:
