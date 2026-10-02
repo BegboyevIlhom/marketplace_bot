@@ -6,7 +6,8 @@ import db.database as db
 from handlers.admin_menu import can_manage_orders
 from utils.states import SetDeliveryPrice, OrderSearch
 from utils.texts import status_text, t
-from keyboards.admin_kb import order_actions_kb, ADMIN_BTN_ACTIVE_ORDERS, ADMIN_BTN_HISTORY_ORDERS, ADMIN_BTN_PAID
+from keyboards.admin_kb import order_actions_kb
+from utils.admin_texts import all_variants
 from keyboards.client_kb import confirm_receipt_kb
 
 router = Router()
@@ -45,7 +46,7 @@ async def _send_order_card(message: Message, order: dict):
     await message.answer(_order_card_text(order, items), reply_markup=order_actions_kb(order))
 
 
-@router.message(F.text == ADMIN_BTN_ACTIVE_ORDERS)
+@router.message(F.text.in_(all_variants("btn_active_orders")))
 async def show_active_orders(message: Message):
     if not await can_manage_orders(message.from_user.id):
         return
@@ -57,7 +58,7 @@ async def show_active_orders(message: Message):
         await _send_order_card(message, o)
 
 
-@router.message(F.text == ADMIN_BTN_HISTORY_ORDERS)
+@router.message(F.text.in_(all_variants("btn_history_orders")))
 async def show_history_orders(message: Message):
     if not await can_manage_orders(message.from_user.id):
         return
@@ -72,7 +73,7 @@ async def show_history_orders(message: Message):
     await message.answer("\n".join(lines))
 
 
-@router.message(F.text == ADMIN_BTN_PAID)
+@router.message(F.text.in_(all_variants("btn_paid")))
 async def show_paid_orders(message: Message):
     if not await can_manage_orders(message.from_user.id):
         return
@@ -93,7 +94,8 @@ async def show_paid_orders(message: Message):
 async def set_status(callback: CallbackQuery, bot: Bot):
     _, order_id, new_status = callback.data.split(":")
     order_id = int(order_id)
-    await db.update_order_status(order_id, new_status)
+    handled_by = callback.from_user.id if new_status == "completed" else None
+    await db.update_order_status(order_id, new_status, handled_by=handled_by)
     order = await db.get_order(order_id)
     user = await db.get_user_by_internal_id(order["user_id"])
 

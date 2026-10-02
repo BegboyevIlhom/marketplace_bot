@@ -1,15 +1,14 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
-import json
 
 import db.database as db
 from utils.states import AddProduct, EditProduct
+from utils.admin_texts import at, all_variants
 from handlers.admin_menu import can_manage_products
 from keyboards.admin_kb import (
     admin_categories_kb, admin_products_kb, skip_old_price_kb, photo_extra_done_kb,
     availability_kb, add_product_confirm_kb, edit_product_fields_kb, confirm_delete_kb,
-    ADMIN_BTN_ADD_PRODUCT, ADMIN_BTN_EDIT_PRODUCT,
 )
 
 router = Router()
@@ -17,7 +16,7 @@ router = Router()
 
 # ============== ADD PRODUCT ==============
 
-@router.message(F.text == ADMIN_BTN_ADD_PRODUCT)
+@router.message(F.text.in_(all_variants("btn_add_product")))
 async def add_product_start(message: Message, state: FSMContext):
     if not await can_manage_products(message.from_user.id):
         return
@@ -71,28 +70,14 @@ async def add_name_ru(message: Message, state: FSMContext):
 @router.message(AddProduct.name_uz)
 async def add_name_uz(message: Message, state: FSMContext):
     await state.update_data(name_uz=message.text)
-    await message.answer("Qisqa tavsif RU (1-3 qator):")
-    await state.set_state(AddProduct.short_ru)
-
-
-@router.message(AddProduct.short_ru)
-async def add_short_ru(message: Message, state: FSMContext):
-    await state.update_data(short_ru=message.text)
-    await message.answer("Qisqa tavsif UZ:")
-    await state.set_state(AddProduct.short_uz)
-
-
-@router.message(AddProduct.short_uz)
-async def add_short_uz(message: Message, state: FSMContext):
-    await state.update_data(short_uz=message.text)
-    await message.answer("To'liq tavsif RU:")
+    await message.answer("Tavsif RU:")
     await state.set_state(AddProduct.full_ru)
 
 
 @router.message(AddProduct.full_ru)
 async def add_full_ru(message: Message, state: FSMContext):
     await state.update_data(full_ru=message.text)
-    await message.answer("To'liq tavsif UZ:")
+    await message.answer("Tavsif UZ:")
     await state.set_state(AddProduct.full_uz)
 
 
@@ -179,7 +164,7 @@ async def add_characteristics(message: Message, state: FSMContext):
     data = await state.get_data()
 
     price = f"{data['price']:,}".replace(",", " ")
-    preview = f"📦 {data['name_ru']}\n\n{data['short_ru']}\n\n{data['full_ru']}\n\n💰 {price}"
+    preview = f"📦 {data['name_ru']}\n\n{data['full_ru']}\n\n💰 {price}"
     if chars:
         preview += f"\n🔧 {chars}"
 
@@ -192,10 +177,27 @@ async def add_characteristics(message: Message, state: FSMContext):
 @router.callback_query(AddProduct.confirm, F.data == "publish")
 async def publish_product(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    product_id = await db.add_product(data)
-    await state.clear()
-    await callback.message.answer(f"✅ Mahsulot qo'shildi (ID: {product_id})")
-    await callback.answer()
+    try:
+        data["added_by"] = callback.from_user.id
+        product_id = await db.add_product(data)
+        # Darhol tekshirib ko'ramiz - haqiqatan ham saqlandimi va to'g'ri kategoriyagami
+        saved = await db.get_product(product_id)
+        cat = await db.get_category(data["category_id"])
+        cat_name = cat["name_ru"] if cat else "?"
+        if not saved or saved["category_id"] != data["category_id"]:
+            await callback.message.answer(
+                "⚠️ Mahsulot saqlandi, lekin tekshiruvda nomuvofiqlik topildi. "
+                "Iltimos, \"📋 Mahsulotlar ro'yxati\" orqali tekshiring."
+            )
+        else:
+            await callback.message.answer(
+                f"✅ Mahsulot qo'shildi (ID: {product_id})\nKategoriya: {cat_name}"
+            )
+    except Exception as e:
+        await callback.message.answer(f"❌ Xatolik yuz berdi, mahsulot saqlanmadi:\n{e}")
+    finally:
+        await state.clear()
+        await callback.answer()
 
 
 @router.callback_query(AddProduct.confirm, F.data == "cancel_add")
@@ -205,9 +207,53 @@ async def cancel_add_product(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+# ============== VIEW PRODUCTS (qaysi kategoriyada nima bor) ==============
+
+@router.message(F.text.in_(all_variants("btn_view_products")))
+async def view_products_start(message: Message):
+    if not await can_manage_products(message.from_user.id):
+        return
+    categories = await db.get_categories()
+    if not categories:
+        await message.answer("Kategoriyalar hali yo'q.")
+        return
+    counts = await db.count_products_per_category()
+    rows = []
+    for c in categories:
+        cnt = counts.get(c["id"], 0)
+        rows.append([InlineKeyboardButton(
+            text=f"{c['name_ru']} / {c['name_uz']} ({cnt})", callback_data=f"viewcat:{c['id']}"
+        )])
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
+    await message.answer("Kategoriyani tanlang:", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("viewcat:"))
+async def view_products_list(callback: CallbackQuery):
+    if not await can_manage_products(callback.from_user.id):
+        return
+    cat_id = int(callback.data.split(":")[1])
+    products = await db.get_all_products_in_category(cat_id)
+    if not products:
+        await callback.answer("Bu kategoriyada mahsulot yo'q.", show_alert=True)
+        return
+    lines = [f"📋 Mahsulotlar ({len(products)} ta):\n"]
+    for p in products:
+        if p["is_hidden"]:
+            status = "🙈 yashirilgan"
+        elif not p["available"]:
+            status = "❌ sotuvda yo'q"
+        else:
+            status = "✅"
+        price = f"{p['price']:,}".replace(",", " ")
+        lines.append(f"#{p['id']} {p['name_ru']} — {price} — {status}")
+    await callback.message.answer("\n".join(lines))
+    await callback.answer()
+
+
 # ============== EDIT / DELETE PRODUCT ==============
 
-@router.message(F.text == ADMIN_BTN_EDIT_PRODUCT)
+@router.message(F.text.in_(all_variants("btn_edit_product")))
 async def edit_product_start(message: Message, state: FSMContext):
     if not await can_manage_products(message.from_user.id):
         return

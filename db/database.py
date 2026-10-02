@@ -169,6 +169,11 @@ async def init_db():
                 name TEXT,
                 added_at BIGINT
             );
+
+            CREATE TABLE IF NOT EXISTS admin_pins (
+                tg_id BIGINT PRIMARY KEY,
+                pin TEXT NOT NULL
+            );
             """
         )
         # Eski (allaqachon ishlab turgan) bazalarga yangi ustunlarni xavfsiz qo'shish.
@@ -177,6 +182,8 @@ async def init_db():
         # qo'lda o'chirilmasdan avtomatik yangilanadi.
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS promo_code TEXT")
         await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount INTEGER DEFAULT 0")
+        await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS completed_by BIGINT")
+        await conn.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS added_by BIGINT")
 
         for k, v in DEFAULT_SETTINGS.items():
             await conn.execute(
@@ -280,15 +287,17 @@ async def add_product(data: dict) -> int:
             """INSERT INTO products
             (category_id, name_ru, name_uz, short_ru, short_uz, full_ru, full_uz,
              price, old_price, photo_main, photos_extra, characteristics_ru,
-             characteristics_uz, available)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+             characteristics_uz, available, added_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
             RETURNING id""",
             data["category_id"], data["name_ru"], data["name_uz"],
-            data["short_ru"], data["short_uz"], data["full_ru"], data["full_uz"],
+            data.get("short_ru", data.get("full_ru", "")), data.get("short_uz", data.get("full_uz", "")),
+            data["full_ru"], data["full_uz"],
             data["price"], data.get("old_price"), data["photo_main"],
             json.dumps(data.get("photos_extra", [])),
             data.get("characteristics_ru", ""), data.get("characteristics_uz", ""),
             1 if data.get("available", True) else 0,
+            data.get("added_by"),
         )
 
 
@@ -558,10 +567,15 @@ async def search_orders(query: str) -> list[dict]:
         return [_d(r) for r in rows]
 
 
-async def update_order_status(order_id: int, status: str):
+async def update_order_status(order_id: int, status: str, handled_by: int | None = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE orders SET status=$1 WHERE id=$2", status, order_id)
+        if status == "completed" and handled_by is not None:
+            await conn.execute(
+                "UPDATE orders SET status=$1, completed_by=$2 WHERE id=$3", status, handled_by, order_id
+            )
+        else:
+            await conn.execute("UPDATE orders SET status=$1 WHERE id=$2", status, order_id)
 
 
 async def set_delivery_price(order_id: int, price: int):
@@ -762,3 +776,56 @@ async def get_all_staff() -> list[dict]:
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM staff ORDER BY added_at")
         return [_d(r) for r in rows]
+
+
+# ---------- ADMIN PIN ----------
+
+async def set_admin_pin(tg_id: int, pin: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO admin_pins (tg_id, pin) VALUES ($1,$2) "
+            "ON CONFLICT (tg_id) DO UPDATE SET pin=excluded.pin",
+            tg_id, pin,
+        )
+
+
+async def get_admin_pin(tg_id: int) -> str | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT pin FROM admin_pins WHERE tg_id=$1", tg_id)
+
+
+# ---------- XODIM STATISTIKASI ----------
+
+async def get_staff_stats(tg_id: int) -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        products_added = await conn.fetchval(
+            "SELECT COUNT(*) FROM products WHERE added_by=$1", tg_id
+        )
+        orders_completed = await conn.fetchval(
+            "SELECT COUNT(*) FROM orders WHERE completed_by=$1", tg_id
+        )
+        return {"products_added": products_added or 0, "orders_completed": orders_completed or 0}
+
+
+# ---------- KATEGORIYA BO'YICHA TO'LIQ RO'YXAT (admin uchun, yashirin/mavjud bo'lmaganlar ham) ----------
+
+async def get_all_products_in_category(cat_id: int) -> list[dict]:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM products WHERE category_id=$1 AND is_deleted=0 ORDER BY id", cat_id
+        )
+        return [_d(r) for r in rows]
+
+
+async def count_products_per_category() -> dict:
+    """Har bir kategoriyada nechta (o'chirilmagan) mahsulot borligini qaytaradi: {category_id: count}."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT category_id, COUNT(*) as cnt FROM products WHERE is_deleted=0 GROUP BY category_id"
+        )
+        return {r["category_id"]: r["cnt"] for r in rows}

@@ -72,12 +72,11 @@ async def show_product_card(callback: CallbackQuery):
     is_fav = await db.is_favorite(user["id"], product_id)
 
     name = p["name_ru"] if lang == "ru" else p["name_uz"]
-    short = p["short_ru"] if lang == "ru" else p["short_uz"]
     full = p["full_ru"] if lang == "ru" else p["full_uz"]
     chars = p["characteristics_ru"] if lang == "ru" else p["characteristics_uz"]
     price = f"{p['price']:,}".replace(",", " ")
 
-    text = f"📦 <b>{name}</b>\n\n{short}\n\n{full}"
+    text = f"📦 <b>{name}</b>\n\n{full}"
     if chars:
         text += f"\n\n🔧 {chars}"
     if p["old_price"]:

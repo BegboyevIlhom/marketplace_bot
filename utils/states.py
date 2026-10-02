@@ -30,6 +30,15 @@ class AddPromo(StatesGroup):
     max_uses = State()
 
 
+class PinAuth(StatesGroup):
+    waiting_pin = State()
+
+
+class SetPin(StatesGroup):
+    waiting_new = State()
+    waiting_confirm = State()
+
+
 class Support(StatesGroup):
     waiting_message = State()
 
@@ -44,8 +53,6 @@ class AddProduct(StatesGroup):
     new_category_uz = State()
     name_ru = State()
     name_uz = State()
-    short_ru = State()
-    short_uz = State()
     full_ru = State()
     full_uz = State()
     price = State()

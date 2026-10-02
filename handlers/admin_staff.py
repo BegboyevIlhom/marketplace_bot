@@ -5,14 +5,15 @@ from aiogram.fsm.context import FSMContext
 import db.database as db
 from handlers.admin_menu import is_admin
 from utils.states import AddStaff
-from keyboards.admin_kb import ADMIN_BTN_STAFF, staff_list_kb, staff_role_kb
+from keyboards.admin_kb import staff_list_kb, staff_role_kb
+from utils.admin_texts import all_variants
 
 router = Router()
 
 ROLE_NAMES = {"manager": "Sotuvchi", "courier": "Kuryer"}
 
 
-@router.message(F.text == ADMIN_BTN_STAFF)
+@router.message(F.text.in_(all_variants("btn_staff")))
 async def staff_menu(message: Message):
     if not is_admin(message.from_user.id):
         return

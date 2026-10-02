@@ -7,12 +7,12 @@ from aiogram.types import Message, BufferedInputFile
 
 import db.database as db
 from handlers.admin_menu import can_manage_products
-from keyboards.admin_kb import ADMIN_BTN_EXPORT
+from utils.admin_texts import all_variants
 
 router = Router()
 
 
-@router.message(F.text == ADMIN_BTN_EXPORT)
+@router.message(F.text.in_(all_variants("btn_export")))
 async def export_customers(message: Message):
     if not await can_manage_products(message.from_user.id):
         return

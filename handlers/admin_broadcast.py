@@ -6,13 +6,14 @@ from aiogram.fsm.context import FSMContext
 import db.database as db
 from handlers.admin_menu import is_admin
 from utils.states import Broadcast
-from keyboards.admin_kb import broadcast_type_kb, broadcast_confirm_kb, ADMIN_BTN_BROADCAST
+from keyboards.admin_kb import broadcast_type_kb, broadcast_confirm_kb
+from utils.admin_texts import all_variants
 from config import BROADCAST_DELAY
 
 router = Router()
 
 
-@router.message(F.text == ADMIN_BTN_BROADCAST)
+@router.message(F.text.in_(all_variants("btn_broadcast")))
 async def broadcast_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return

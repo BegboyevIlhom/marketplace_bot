@@ -6,13 +6,14 @@ import db.database as db
 from handlers.admin_menu import is_admin
 from utils.states import AddPromo
 from keyboards.admin_kb import (
-    ADMIN_BTN_PROMO, promo_menu_kb, promo_type_kb, promo_skip_maxuses_kb, promo_list_kb,
+    promo_menu_kb, promo_type_kb, promo_skip_maxuses_kb, promo_list_kb,
 )
+from utils.admin_texts import all_variants
 
 router = Router()
 
 
-@router.message(F.text == ADMIN_BTN_PROMO)
+@router.message(F.text.in_(all_variants("btn_promo")))
 async def promo_menu(message: Message):
     if not is_admin(message.from_user.id):
         return

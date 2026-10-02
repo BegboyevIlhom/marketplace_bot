@@ -4,12 +4,13 @@ from aiogram.types import Message, CallbackQuery
 
 import db.database as db
 from handlers.admin_menu import is_admin
-from keyboards.admin_kb import stats_period_kb, ADMIN_BTN_STATS
+from keyboards.admin_kb import stats_period_kb
+from utils.admin_texts import all_variants
 
 router = Router()
 
 
-@router.message(F.text == ADMIN_BTN_STATS)
+@router.message(F.text.in_(all_variants("btn_stats")))
 async def show_stats_menu(message: Message):
     if not is_admin(message.from_user.id):
         return

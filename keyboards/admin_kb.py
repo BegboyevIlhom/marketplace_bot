@@ -2,45 +2,44 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton,
 )
 from db.database import SETTINGS_LABELS
-
-ADMIN_BTN_ADD_PRODUCT = "➕ Добавить продукт / Mahsulot qo'shish"
-ADMIN_BTN_EDIT_PRODUCT = "✏️ Редактировать / удалить / Tahrirlash-o'chirish"
-ADMIN_BTN_ACTIVE_ORDERS = "📦 Актуальные заказы / Aktual buyurtmalar"
-ADMIN_BTN_HISTORY_ORDERS = "🗃 Старые заказы / Eski buyurtmalar"
-ADMIN_BTN_PAID = "💰 Оплаченные / To'langanlar"
-ADMIN_BTN_BROADCAST = "📢 Рассылка / Post yuborish"
-ADMIN_BTN_SETTINGS = "⚙️ Настройки / Sozlamalar"
-ADMIN_BTN_STATS = "📊 Продажи / Sotuvlar"
-ADMIN_BTN_EXPORT = "📥 Mijozlar ro'yxati"
-ADMIN_BTN_PROMO = "🎟 Promo-kodlar"
-ADMIN_BTN_STAFF = "👥 Xodimlar"
-ADMIN_BTN_EXIT = "🚪 Выйти из админки / Admin panelidan chiqish"
+from utils.admin_texts import at
 
 
-def admin_main_menu_kb() -> ReplyKeyboardMarkup:
-    """Eski nom - orqaga moslik uchun saqlangan, to'liq (admin) menyuni qaytaradi."""
-    return admin_menu_kb_for_role("admin")
-
-
-def admin_menu_kb_for_role(role: str) -> ReplyKeyboardMarkup:
-    """Rolga qarab turlicha admin-panel menyusi.
+def admin_menu_kb_for_role(role: str, lang: str = "uz") -> ReplyKeyboardMarkup:
+    """Rolga VA tilga qarab turlicha admin-panel menyusi - har bir xodim
+    o'zi tanlagan tilda to'liq bir xil tilda ko'radi (aralash emas).
     admin   - hammasi
     manager - mahsulot + buyurtmalar + mijozlar ro'yxati (sotuvchi)
     courier - faqat buyurtmalar (kuryer)
     """
     rows = []
     if role in ("admin", "manager"):
-        rows.append([KeyboardButton(text=ADMIN_BTN_ADD_PRODUCT)])
-        rows.append([KeyboardButton(text=ADMIN_BTN_EDIT_PRODUCT)])
+        rows.append([KeyboardButton(text=at("btn_add_product", lang))])
+        rows.append([KeyboardButton(text=at("btn_edit_product", lang))])
+        rows.append([KeyboardButton(text=at("btn_view_products", lang))])
     if role in ("admin", "manager", "courier"):
-        rows.append([KeyboardButton(text=ADMIN_BTN_ACTIVE_ORDERS), KeyboardButton(text=ADMIN_BTN_HISTORY_ORDERS)])
+        rows.append([
+            KeyboardButton(text=at("btn_active_orders", lang)),
+            KeyboardButton(text=at("btn_history_orders", lang)),
+        ])
     if role in ("admin", "manager"):
-        rows.append([KeyboardButton(text=ADMIN_BTN_PAID), KeyboardButton(text=ADMIN_BTN_EXPORT)])
+        rows.append([
+            KeyboardButton(text=at("btn_paid", lang)),
+            KeyboardButton(text=at("btn_export", lang)),
+        ])
+    rows.append([KeyboardButton(text=at("btn_mystats", lang))])
     if role == "admin":
-        rows.append([KeyboardButton(text=ADMIN_BTN_BROADCAST)])
-        rows.append([KeyboardButton(text=ADMIN_BTN_SETTINGS), KeyboardButton(text=ADMIN_BTN_STATS)])
-        rows.append([KeyboardButton(text=ADMIN_BTN_PROMO), KeyboardButton(text=ADMIN_BTN_STAFF)])
-    rows.append([KeyboardButton(text=ADMIN_BTN_EXIT)])
+        rows.append([KeyboardButton(text=at("btn_broadcast", lang))])
+        rows.append([
+            KeyboardButton(text=at("btn_settings", lang)),
+            KeyboardButton(text=at("btn_stats", lang)),
+        ])
+        rows.append([
+            KeyboardButton(text=at("btn_promo", lang)),
+            KeyboardButton(text=at("btn_staff", lang)),
+        ])
+    rows.append([KeyboardButton(text=at("btn_set_pin", lang))])
+    rows.append([KeyboardButton(text=at("btn_exit", lang))])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
@@ -94,7 +93,6 @@ def add_product_confirm_kb() -> InlineKeyboardMarkup:
 def edit_product_fields_kb(product_id: int) -> InlineKeyboardMarkup:
     fields = [
         ("name_ru", "Название RU"), ("name_uz", "Nomi UZ"),
-        ("short_ru", "Кратко RU"), ("short_uz", "Qisqa UZ"),
         ("full_ru", "Описание RU"), ("full_uz", "Tavsif UZ"),
         ("price", "Цена / Narx"), ("old_price", "Старая цена / Eski narx"),
         ("photo_main", "Фото / Rasm"),
@@ -159,10 +157,10 @@ def broadcast_confirm_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def settings_kb() -> InlineKeyboardMarkup:
+def settings_kb(lang: str = "uz") -> InlineKeyboardMarkup:
     rows = []
     for key, label in SETTINGS_LABELS.items():
-        rows.append([InlineKeyboardButton(text=f"{label['ru']} / {label['uz']}", callback_data=f"setkey:{key}")])
+        rows.append([InlineKeyboardButton(text=label.get(lang, label["uz"]), callback_data=f"setkey:{key}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
